@@ -1,9 +1,9 @@
-package main.java.org.example;
+package org.example;
 
-import main.java.org.example.Impl.ServiceImpl;
-import main.java.org.example.Impl.ServiceImpl2;
-import main.java.org.example.Proxy.Utils.CacheProxy;
-import main.java.org.example.Service.Service;
+import org.example.Impl.ServiceImpl;
+import org.example.Impl.ServiceImpl2;
+import org.example.Proxy.Utils.CacheProxy;
+import org.example.Service.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;

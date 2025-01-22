@@ -1,7 +1,7 @@
-package main.java.org.example.Proxy.Utils;
+package org.example.Proxy.Utils;
 
 
-import main.java.org.example.Proxy.CacheHandler;
+import org.example.Proxy.CacheHandler;
 
 import java.lang.reflect.Proxy;
 

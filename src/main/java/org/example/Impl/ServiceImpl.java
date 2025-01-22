@@ -1,6 +1,6 @@
-package main.java.org.example.Impl;
+package org.example.Impl;
 
-import main.java.org.example.Service.Service;
+import org.example.Service.Service;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -1,8 +1,8 @@
-package main.java.org.example.Annotation;
+package org.example.Annotation;
 
 
 
-import main.java.org.example.Proxy.Utils.CacheType;
+import org.example.Proxy.Utils.CacheType;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;

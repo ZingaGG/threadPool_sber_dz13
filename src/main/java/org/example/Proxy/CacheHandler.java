@@ -1,7 +1,7 @@
-package main.java.org.example.Proxy;
+package org.example.Proxy;
 
-import main.java.org.example.Annotation.Cache;
-import main.java.org.example.Proxy.Utils.CacheType;
+import org.example.Annotation.Cache;
+import org.example.Proxy.Utils.CacheType;
 
 
 import java.io.*;
