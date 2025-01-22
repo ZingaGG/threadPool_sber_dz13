@@ -3,7 +3,6 @@ package org.example.Proxy;
 import org.example.Annotation.Cache;
 import org.example.Proxy.Utils.CacheType;
 
-
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
@@ -11,10 +10,12 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -22,9 +23,10 @@ import java.util.zip.ZipOutputStream;
 public class CacheHandler implements InvocationHandler {
     private final Object target;
     private final String rootPath;
-    private final Map<String, Object> cache = new HashMap<>();
+    private final Map<String, Object> cache = new ConcurrentHashMap<>(); // HashMap -> ConcurrentHashMap
+    private final Map<String, Lock> lockMap = new ConcurrentHashMap<>(); // Создал для лока конкретного ключа на время использования
 
-    public CacheHandler(String rootPath, Object target){
+    public CacheHandler(String rootPath, Object target) {
         this.target = target;
         this.rootPath = rootPath;
     }
@@ -33,7 +35,7 @@ public class CacheHandler implements InvocationHandler {
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
         Cache annotation = method.getAnnotation(Cache.class);
 
-        if(annotation == null){
+        if (annotation == null) {
             return method.invoke(target, args);
         }
 
@@ -49,7 +51,7 @@ public class CacheHandler implements InvocationHandler {
         StringBuilder stringBuilder = new StringBuilder(target.getClass().getSimpleName() + "_" + method.getName());
         Set<Class<?>> setOfClasses = Set.of(cacheAnnotation.identityBy());
 
-        if(args == null){
+        if (args == null) {
             System.out.println("Key created: " + stringBuilder);
             return stringBuilder.toString();
         }
@@ -62,55 +64,69 @@ public class CacheHandler implements InvocationHandler {
 
         return stringBuilder.toString();
     }
+
     private Object memoryCache(Method method, Object[] args, String cacheKey, Cache cacheAnnotation) throws InvocationTargetException, IllegalAccessException {
-       if(cache.containsKey(cacheKey)){
-           System.out.print("Взято из кэша - "); // Для видимости, если взято из кэша
-           return cache.get(cacheKey);
-       }
+        Lock lock = lockMap.computeIfAbsent(cacheKey, k -> new ReentrantLock()); // Тут помещаю локи на конкретный ключ, если не было создаю новый
 
-       Object methodResult = method.invoke(target, args);
-       if(methodResult instanceof List<?> resultList && resultList.size() > cacheAnnotation.listList()){
-           methodResult = resultList.subList(0, cacheAnnotation.listList());
-       }
+        lock.lock(); // локаю по ключу
+        try {
+            if (cache.containsKey(cacheKey)) {
+                System.out.print("Взято из кэша - ");
+                return cache.get(cacheKey);
+            }
 
-       cache.put(cacheKey, methodResult);
-       System.out.print("Выполнено впервые - ");
-       return methodResult;
+            Object methodResult = method.invoke(target, args);
+            if (methodResult instanceof List<?> resultList && resultList.size() > cacheAnnotation.listList()) {
+                methodResult = resultList.subList(0, cacheAnnotation.listList());
+            }
+
+            cache.put(cacheKey, methodResult);
+            System.out.print("Выполнено впервые - ");
+            return methodResult;
+        } finally {
+            lock.unlock(); // анлокаю, чтобы не было дедлока
+        }
     }
 
     private Object cacheIntoFile(Method method, Object[] args, String cacheKey, Cache cacheAnnotation) throws InvocationTargetException, IllegalAccessException, IOException {
-        Path cacheFile;
+        Lock lock = lockMap.computeIfAbsent(cacheKey, k -> new ReentrantLock()); // Тут помещаю локи на конкретный ключ, если не было создаю новый
 
-        if(cacheAnnotation.fileNamePrefix().isEmpty()){
-            cacheFile = Paths.get(rootPath, cacheKey);
-        } else {
-            cacheFile = Paths.get(rootPath, cacheAnnotation.fileNamePrefix() + "_" + cacheKey);
+        lock.lock(); // локаю по ключу
+        try {
+            Path cacheFile;
+
+            if (cacheAnnotation.fileNamePrefix().isEmpty()) {
+                cacheFile = Paths.get(rootPath, cacheKey);
+            } else {
+                cacheFile = Paths.get(rootPath, cacheAnnotation.fileNamePrefix() + "_" + cacheKey);
+            }
+
+            if (Files.exists(Paths.get(cacheFile + ".zip"))) {
+                return readZIPFile(cacheFile);
+            }
+
+            if (Files.exists(Paths.get(cacheFile + ".cache"))) {
+                return readRegularFile(cacheFile);
+            }
+
+            Object result = method.invoke(target, args);
+            if (result instanceof List<?> listResult && listResult.size() > cacheAnnotation.listList()) {
+                result = listResult.subList(0, cacheAnnotation.listList());
+            }
+
+            Files.createDirectories(cacheFile.getParent());
+
+            if (cacheAnnotation.zip()) {
+                writeRegularFileWithZIP(result, cacheFile);
+            } else {
+                writeRegularFile(result, cacheFile);
+            }
+
+            System.out.print("Выполнено впервые - ");
+            return result;
+        } finally {
+            lock.unlock(); // анлокаю, чтобы не было дедлока
         }
-
-
-        if (Files.exists(Paths.get(cacheFile + ".zip"))) {
-            return readZIPFile(cacheFile);
-        }
-
-        if (Files.exists(Paths.get(cacheFile + ".cache"))) {
-            return readRegularFile(cacheFile);
-        }
-
-        Object result = method.invoke(target, args);
-        if (result instanceof List<?> listResult && listResult.size() > cacheAnnotation.listList()) {
-            result = listResult.subList(0, cacheAnnotation.listList());
-        }
-
-        Files.createDirectories(cacheFile.getParent());
-
-        if(cacheAnnotation.zip()){
-            writeRegularFileWithZIP(result, cacheFile);
-        } else {
-            writeRegularFile(result, cacheFile);
-        }
-
-        System.out.print("Выполнено впервые - ");
-        return result;
     }
 
     private void writeRegularFile(Object result, Path cacheFile) throws IOException {
@@ -149,19 +165,19 @@ public class CacheHandler implements InvocationHandler {
         Files.delete(tempFile);
     }
 
-    private Object readRegularFile(Path cacheFile){
+    private Object readRegularFile(Path cacheFile) {
         Path cacheFileName = Paths.get(cacheFile + ".cache");
 
         try (InputStream inputStream = Files.newInputStream(cacheFileName);
              ObjectInputStream objectInputStream = new ObjectInputStream(inputStream)) {
-            System.out.print("Взято из кэша - "); // Для видимости, если взято из кэша
+            System.out.print("Взято из кэша - ");
             return objectInputStream.readObject();
         } catch (Exception e) {
             throw new RuntimeException("Ошибка в чтение кэша с файла: " + cacheFile, e);
         }
     }
 
-    private Object readZIPFile(Path cacheFile){
+    private Object readZIPFile(Path cacheFile) {
         Path cacheFileName = Paths.get(cacheFile.toString() + ".zip");
 
         try (InputStream fileInputStream = Files.newInputStream(cacheFileName);
@@ -181,4 +197,3 @@ public class CacheHandler implements InvocationHandler {
         }
     }
 }
-
